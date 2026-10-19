@@ -51,5 +51,5 @@
 
 - [x] 앨범 콘셉트
 - [x] 곡 주제
-- [ ] 가사 → `lyrics/Salt Line.md`
-- [ ] 수노 스타일 프롬프트
+- [x] 가사 → `lyrics/Salt Line.md`
+- [x] 수노 스타일 프롬프트 (`lyrics/Salt Line.md`에 포함)
