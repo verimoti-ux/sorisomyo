@@ -23,6 +23,34 @@
 | Drop 2 · Final Chorus | 느린 파도 | [Pexels: Ocean Waves in Slow Motion](https://www.pexels.com/video/footage-of-the-ocean-waves-in-slow-motion-3834452/) | "Let it rise" |
 | 예비 | 해변을 걷는 여성 실루엣 | [Mixkit: Woman's Silhouette Walking on the Beach at Sunset](https://mixkit.co/free-stock-video/womans-silhouette-walking-on-the-beach-at-sunset-1214/) | 노을빛이라 흑백이나 저채도로 바꿔 쓰기 |
 
+## 추가 클립 (2차 수집)
+
+### 개별 페이지 확인
+
+| 구간 | 장면 | 클립 | 메모 |
+|---|---|---|---|
+| Intro · 전환 | 느리게 흐르는 하얀 안개 | [Mixkit: An ethereal thick white mist flows slowly](https://mixkit.co/free-stock-video/an-ethereal-thick-white-mist-flows-slowly-generating-a-soft-50937/) | 0:11. 장면 사이 전환이나 다른 클립 위 오버레이용 |
+| Drop 1 | 파도 위로 내려앉는 안개 | [Mixkit: An ethereal white mist masks waves as it descends](https://mixkit.co/free-stock-video/an-ethereal-white-mistrapidly-maskes-waves-as-it-descents-50941/) | 0:12. 드롭 직전 고조 구간 |
+| 오버레이 | 어두운 배경 위 옅은 안개 | [Mixkit: A light mist continuously flows](https://mixkit.co/free-stock-video/a-light-mist-continuously-flows-generating-a-soft-light-texture-50939/) | 0:08. 스크린 모드로 겹쳐 자막 배경 질감용 |
+| Verse 1 | 바위가 가득한 해변 | [Mixkit: View of a beautiful beach full of rocks](https://mixkit.co/free-stock-video/view-of-a-beautiful-beach-full-of-rocks-4371/) | 와이드 설정 컷 |
+| Pre-Chorus 1 | 바위 위에 선 하얀 옷의 여성 | [Mixkit: Woman standing on big rocks near the water](https://mixkit.co/free-stock-video/woman-standing-on-big-rocks-near-the-water-1024/) | 뒤로 파도. "I thought the wind would carry it away" |
+
+### 목록 페이지에서만 확인 (클립 제목으로 검색해서 찾기)
+
+| 구간 | 클립 제목 | 찾는 곳 | 메모 |
+|---|---|---|---|
+| Intro · Bridge | Ocean fog rolling in | [Mixkit ocean 목록 32쪽](https://mixkit.co/free-stock-video/ocean/?page=32) | 바다 위로 밀려오는 안개 |
+| Intro · Bridge | Fog sweeping across the ocean | [Mixkit ocean 목록 35쪽](https://mixkit.co/free-stock-video/ocean/?page=35) | 위와 비슷한 예비 컷 |
+| Verse 1 | Large rocks on the sea shore on a cloudy day | [Mixkit 전체 목록 160쪽](https://mixkit.co/free-stock-video/discover/?page=160) | 흐린 날 큰 바위. 톤이 가장 잘 맞을 후보 |
+| Chorus | Waves crash on the rocks (위에서 내려다본 컷) | [Mixkit 목록](https://mixkit.co/free-stock-video/accident/?page=3) | 바위 사이 하얀 거품이 선처럼 보임 |
+| Verse 2 | Feet walking on the beach | [Mixkit feet 목록](https://mixkit.co/free-stock-video/feet/) | 하얀 옷의 발자국이 작은 파도에 지워짐. 지워지는 발자국과 안 지워지는 소금선을 대비시키는 컷 |
+
+### 라이선스 확인이 필요한 후보
+
+- [Uppbeat: Woman in raincoat on rocky coast](https://uppbeat.io/stock-video/asset/woman-in-raincoat-on-rocky-coast-202356): 흐린 날 바위 해안. 노란 우비라 저채도로 바꿔 쓰기
+- [Uppbeat: Footprints on wet beach sand](https://uppbeat.io/stock-video/asset/footprints-on-wet-beach-sand-25354)
+- Uppbeat는 무료 플랜에서 출처 표기 조건이 붙을 수 있어 다운로드 전에 확인할 것
+
 ## 아직 못 찾은 장면
 
 - **바위에 남은 하얀 소금선:** 곡의 핵심 장면인데, 무료 클립에서는 찾지 못했다.
