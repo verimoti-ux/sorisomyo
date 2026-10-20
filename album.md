@@ -53,6 +53,7 @@
 - [x] 곡 주제
 - [x] 가사 → `lyrics/Salt Line.md`
 - [x] 수노 스타일 프롬프트 (`lyrics/Salt Line.md`에 포함)
+- [x] 가사 9차원 검증 후 수정 (후렴 비유, 2절 프리코러스, 마지막 후렴 음절 수)
 - [x] 한영 자막 (`lyrics/Salt Line.md`에 포함)
 - [x] 유튜브 설명글 · 자막 텍스트 → `youtube/`
 - [x] 무료 영상 클립 목록 → `youtube/Salt Line - clips.md`

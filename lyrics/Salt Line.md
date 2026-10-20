@@ -36,7 +36,7 @@ The brighter it stays
 
 [Chorus]
 The drier it gets, the clearer the line
-Salt on the stone where your water met mine
+Salt on the stone where you stayed for a time
 The further you go, the whiter it shines
 The drier it gets, the clearer the line
 
@@ -51,13 +51,13 @@ It dries again, and whiter every time
 
 [Pre-Chorus]
 I thought that time would wear it down
-I keep on walking to the water's edge
+But I keep walking to the water's edge
 And every day you're further out
-I stand where the water left
+I stand where the water left me
 
 [Chorus]
 The drier it gets, the clearer the line
-Salt on the stone where your water met mine
+Salt on the stone where you stayed for a time
 The further you go, the whiter it shines
 The drier it gets, the clearer the line
 
@@ -77,8 +77,8 @@ Let it rise
 
 [Final Chorus]
 The drier it gets, the clearer the line
-Salt on the stone where your water met mine
-Now the sea's coming in, and I'm letting it climb
+Salt on the stone where you stayed for a time
+Now the tide's coming in, and I let it climb
 Let it come, let it cover the line
 
 [Outro]
@@ -119,8 +119,8 @@ The brighter it stays
 The drier it gets, the clearer the line
 마를수록 선은 더 선명해져
 
-Salt on the stone where your water met mine
-너의 물이 나의 물과 만나던 돌 위의 소금
+Salt on the stone where you stayed for a time
+네가 잠시 머물다 간 돌 위의 소금
 
 The further you go, the whiter it shines
 네가 멀어질수록 더 하얗게 빛나
@@ -143,20 +143,20 @@ It dries again, and whiter every time
 I thought that time would wear it down
 시간이 닳게 해 줄 줄 알았어
 
-I keep on walking to the water's edge
+But I keep walking to the water's edge
 그런데 자꾸만 물가로 걸어가
 
 And every day you're further out
 하루하루 네가 더 멀어질수록
 
-I stand where the water left
-나는 물이 떠난 자리에 서 있어
+I stand where the water left me
+물이 나를 두고 간 자리에 서 있어
 
 The drier it gets, the clearer the line
 마를수록 선은 더 선명해져
 
-Salt on the stone where your water met mine
-너의 물이 나의 물과 만나던 돌 위의 소금
+Salt on the stone where you stayed for a time
+네가 잠시 머물다 간 돌 위의 소금
 
 The further you go, the whiter it shines
 네가 멀어질수록 더 하얗게 빛나
@@ -185,11 +185,11 @@ Let it rise
 The drier it gets, the clearer the line
 마를수록 선은 더 선명해져
 
-Salt on the stone where your water met mine
-너의 물이 나의 물과 만나던 돌 위의 소금
+Salt on the stone where you stayed for a time
+네가 잠시 머물다 간 돌 위의 소금
 
-Now the sea's coming in, and I'm letting it climb
-이제 바다가 밀려와, 차오르는 대로 둘 거야
+Now the tide's coming in, and I let it climb
+이제 밀물이 들어와, 차오르는 대로 둘게
 
 Let it come, let it cover the line
 오게 둬, 그 선을 덮게 둬
