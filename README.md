@@ -7,7 +7,7 @@
 
 | 스킬 | 설명 |
 |---|---|
-| `audio/izotope-sim` | iZotope Ozone/Neutron 스타일 체인(EQ·Dynamics·De-esser·Exciter·Imager·Maximizer) 시뮬레이션과 LUFS/트루피크 측정 |
+| `audio/izotope-sim` | iZotope Ozone/Neutron 스타일 체인(EQ·Dynamics·De-esser·Exciter·Imager·Maximizer) 시뮬레이션, 빈약한 음원 두께 보강(Thicken), LUFS/트루피크 측정 |
 
 설치:
 

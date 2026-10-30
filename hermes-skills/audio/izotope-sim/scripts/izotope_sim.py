@@ -333,6 +333,14 @@ def _band_db(f, p, lo, hi):
     return 10 * math.log10(max(p[sel].sum(), EPS))
 
 
+BODY_TARGET_DB, BODY_THIN_DB = 10.0, 6.0
+
+
+def _body_index(f, p):
+    """두께 지표: 저중역(150–600Hz) 에너지 - 고역(2.4–9.6kHz) 에너지. 둘 다 2옥타브라 핑크노이즈는 0dB."""
+    return _band_db(f, p, 150, 600) - _band_db(f, p, 2400, 9600)
+
+
 def analyze(x, sr):
     peak = float(np.abs(x).max())
     tp = float(true_peak_env(x).max())
@@ -350,6 +358,7 @@ def analyze(x, sr):
         "plr_db": round(_db(tp) - loud["integrated_lufs"], 2),
         "band_balance_db": {n: round(_band_db(f, p, lo, hi) - total, 2) for n, lo, hi in BANDS + METALLIC},
         "octave_db": {str(c): round(_band_db(f, p, c / 2 ** 0.5, c * 2 ** 0.5) - total, 2) for c in OCTAVES},
+        "body_index_db": round(_body_index(f, p), 2),
         "clipped_samples": int(np.sum(np.abs(x) >= 0.9999)),
     }
     if x.shape[1] == 2:
@@ -576,13 +585,114 @@ def mod_gain(x, sr, p):
     return x * 10 ** (float(p.get("gain", 0)) / 20), {}
 
 
+def _mod_delay(sig, sr, base_ms, depth_ms, rate_hz, phase):
+    t = np.arange(len(sig))
+    d = (base_ms + depth_ms * np.sin(2 * np.pi * rate_hz * t / sr + phase)) * sr / 1000
+    return np.interp(t - d, t, sig, left=0.0)
+
+
+def _rms(v):
+    return math.sqrt(float(np.mean(v ** 2))) + EPS
+
+
+def mod_thicken(x, sr, p):
+    """빈약한 음원 보강: 저역 배음 생성 + 저중역 병렬 압축(밀도) + 사이드 전용 더블러 + 바디 EQ.
+
+    amount(0-100, 기본 50)가 네 단계의 양을 함께 조절한다. auto_gain(기본 true)이면
+    처리 전 통합 라우드니스로 되돌려 '커져서 두꺼워 보이는' 착시를 없앤다.
+    """
+    k = max(0.0, min(100.0, float(p.get("amount", 50)))) / 50
+    f0, p0 = _avg_spectrum(x, sr)
+    body_before = _body_index(f0, p0)
+    lufs_before = loudness(x, sr)["integrated_lufs"]
+    info = {"amount": round(k * 50)}
+    y = x
+
+    # 1) 하모닉: 저역(기본 60–350Hz)에서 2·3차 배음을 만들어 120Hz–1.4kHz에 더한다.
+    #    v²(짝수)·v³(홀수) 배음에서 원신호와 상관된 성분을 최소제곱으로 빼서 기음은 건드리지 않는다.
+    #    작은 스피커에서도 저역이 '들리는' 심리음향 베이스 보강(Ozone Exciter/Low End Focus 개념).
+    #    even(기본 0.7)이 클수록 따뜻하다.
+    h = p.get("harmonics", {})
+    h_mix = float(h.get("mix", 35)) / 100 * k
+    if h_mix > 0:
+        lo, hi = float(h.get("low", 60)), float(h.get("high", 350))
+        band = split_bands(y, sr, [lo, hi])[1]
+        ref = float(np.percentile(np.abs(band), 99.5)) + EPS
+        v = np.clip(band / ref, -1, 1)
+        even = max(0.0, min(1.0, float(h.get("even", 0.7))))
+        gen = even * v ** 2 + (1 - even) * v ** 3
+        gen -= gen.mean(axis=0)
+        gen -= np.sum(gen * v, axis=0) / (np.sum(v * v, axis=0) + EPS) * v
+        gen *= _rms(v) / _rms(gen)
+        harm = split_bands(gen * ref, sr, [lo * 2, hi * 4])[1]
+        y = y + h_mix * harm
+        info["harmonics_db"] = round(_db(_rms(h_mix * harm)) - _db(_rms(x)), 1)
+
+    # 2) 밀도: 저중역(기본 150–1000Hz)을 강하게 압축한 신호를 RMS를 맞춰 병렬로 섞는다.
+    #    큰 소리는 그대로, 잔향·서스테인처럼 작은 부분이 올라와 소리가 꽉 찬다.
+    dn = p.get("density", {})
+    d_mix = min(0.8, float(dn.get("mix", 30)) / 100 * k)
+    if d_mix > 0:
+        lo, hi = float(dn.get("low", 150)), float(dn.get("high", 1000))
+        low, mid, high = split_bands(y, sr, [lo, hi])
+        thr = _db(_rms(mid)) - 6
+        curve, gr = _gain_reduction(mid, sr, {"threshold": thr, "ratio": float(dn.get("ratio", 4)),
+                                              "attack": 10, "release": 120, "knee": 6})
+        comp = mid * curve[:, None]
+        comp *= _rms(mid) / _rms(comp)
+        y = low + (1 - d_mix) * mid + d_mix * comp + high
+        info["density_gr_db"] = round(max(0.0, gr), 2)
+
+    # 3) 더블러: 300Hz–6kHz 미드를 서로 다른 변조 딜레이 두 개로 복제해 사이드에만 더한다.
+    #    모노로 합치면 정확히 상쇄되므로 모노 호환성을 해치지 않는다.
+    db_ = p.get("doubler", {})
+    w_mix = float(db_.get("mix", 25)) / 100 * k
+    if w_mix > 0 and y.shape[1] == 2:
+        m, s = to_ms(y)
+        src = split_bands(m[:, None], sr, [float(db_.get("low", 300)), float(db_.get("high", 6000))])[1][:, 0]
+        v1 = _mod_delay(src, sr, 13.0, 1.2, 0.35, 0.0)
+        v2 = _mod_delay(src, sr, 19.0, 1.5, 0.27, math.pi / 2)
+        y = from_ms(m, s + w_mix * (v1 - v2) / 2)
+        info["doubler_mix"] = round(w_mix * 100)
+    elif w_mix > 0:
+        info["doubler"] = "모노 입력이라 건너뜀"
+
+    # 4) 바디 EQ: 두께 지표가 목표보다 모자란 만큼 300Hz 넓은 벨(150–600Hz)을 올린다(최대 +3dB).
+    body_eq = p.get("body_eq", "auto")
+    if body_eq == "auto":
+        f1, p1 = _avg_spectrum(y, sr)
+        body_eq = max(0.0, min(3.0, (BODY_TARGET_DB - _body_index(f1, p1)) / 3)) * min(1.0, k)
+    body_eq = float(body_eq)
+    if abs(body_eq) >= 0.1:
+        hfir, dly = eq_fir([{"type": "bell", "freq": 300, "gain": body_eq, "q": 0.7}], sr)
+        y = fft_convolve(y, hfir, dly)
+    info["body_eq_db"] = round(body_eq, 1)
+
+    if p.get("auto_gain", True) and math.isfinite(lufs_before):
+        y = y * 10 ** ((lufs_before - loudness(y, sr)["integrated_lufs"]) / 20)
+    f2, p2 = _avg_spectrum(y, sr)
+    info["body_index_db"] = [round(body_before, 1), round(_body_index(f2, p2), 1)]
+    if y.shape[1] == 2:
+        def corr(v):
+            return float(np.sum(v[:, 0] * v[:, 1]) / (math.sqrt(float(np.sum(v[:, 0] ** 2) * np.sum(v[:, 1] ** 2))) + EPS))
+        c0, c1 = corr(x), corr(y)
+        info["stereo_correlation"] = [round(c0, 2), round(c1, 2)]
+        if c1 < c0 - 0.2:
+            info["phase_warning"] = "스테레오 상관도가 0.2 넘게 떨어졌습니다. doubler.mix를 낮추세요."
+    tp = _db(float(true_peak_env(y).max()))
+    if tp > -0.5:
+        info["warning"] = f"트루피크 {tp:.1f}dBTP. 뒤에 maximizer를 두거나 앞에 gain -3을 넣으세요."
+    return y, info
+
+
 MODULES = {"eq": mod_eq, "dynamics": mod_dynamics, "deesser": mod_deesser,
            "exciter": mod_exciter, "imager": mod_imager, "maximizer": mod_maximizer,
-           "gain": mod_gain}
+           "thicken": mod_thicken, "gain": mod_gain}
 ALIASES = {"ozone_eq": "eq", "neutron_eq": "eq", "equalizer": "eq", "compressor": "dynamics",
            "ozone_dynamics": "dynamics", "de-esser": "deesser", "de_ess": "deesser",
            "stereo_imager": "imager", "ozone_imager": "imager", "limiter": "maximizer",
-           "ozone_maximizer": "maximizer", "ozone_exciter": "exciter", "saturation": "exciter"}
+           "ozone_maximizer": "maximizer", "ozone_exciter": "exciter", "saturation": "exciter",
+           "enrich": "thicken", "body": "thicken", "warmth": "thicken", "fatten": "thicken"}
 
 
 def run_chain(x, sr, chain):
@@ -646,6 +756,16 @@ PRESETS = {
             {"module": "deesser", "low": 6000, "high": 11000, "threshold": -34, "ratio": 3},
         ],
     },
+    "thicken": {
+        "description": "빈약한 음원 보강 — 저역 배음·저중역 밀도·사이드 더블러·바디 EQ 후 -14 LUFS. 쇳소리 대역은 건드리지 않음.",
+        "modules": [
+            {"module": "eq", "bands": [HP, {"type": "bell", "freq": 3500, "gain": -1.0, "q": 4.0}]},
+            {"module": "thicken", "amount": 60},
+            {"module": "dynamics", "bands": [{"threshold": -20, "ratio": 1.5, "attack": 30, "release": 180, "knee": 8}]},
+            {"module": "imager", "crossovers": [120], "widths": [-100, 0]},
+            {"module": "maximizer", "target_lufs": -14, "ceiling": -1.0, "character": "balanced"},
+        ],
+    },
     "youtube-loudness": {
         "description": "유튜브 기준 음압만 맞춤 — -14 LUFS, -1 dBTP.",
         "modules": [{"module": "maximizer", "target_lufs": -14, "ceiling": -1.0, "character": "transparent"}],
@@ -685,6 +805,11 @@ def assist(x, sr, series=None, target=-14.0):
     modules = [{"module": "eq", "bands": bands}]
     if series == "blues" or a["band_balance_db"]["metallic_8k_16k"] > -14:
         modules.append({"module": "deesser", "low": 5500, "high": 10000, "threshold": -32, "ratio": 3})
+    body = a["body_index_db"]
+    if body < BODY_THIN_DB:
+        amount = int(max(30, min(80, (BODY_TARGET_DB - body) * 8)))
+        modules.append({"module": "thicken", "amount": amount})
+        notes.append(f"두께 지표 {body:.1f}dB(기준 {BODY_THIN_DB:g} 미만)로 빈약함 → thicken amount {amount}")
     plr = a["plr_db"]
     if plr > 16:
         thr = round(a["rms_dbfs"] + 4, 1)

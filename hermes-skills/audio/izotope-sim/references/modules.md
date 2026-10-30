@@ -13,6 +13,7 @@
 | `exciter` (ozone_exciter, saturation) | Ozone Exciter | 멀티밴드, tape/tube/warm 커브, drive·mix | Retro/Triode 모드, 오버샘플링 |
 | `imager` (stereo_imager, ozone_imager) | Ozone Imager | 멀티밴드 폭 -100~+100 | Stereoize, 벡터스코프 |
 | `maximizer` (limiter, ozone_maximizer) | Ozone Maximizer | 룩어헤드 트루피크 리미터, 목표 LUFS 자동 게인, 성격별 릴리즈 | IRC 알고리즘, Soft Clip, Transient Emphasis |
+| `thicken` (enrich, body, warmth, fatten) | Ozone Exciter + Low End Focus + Neutron 병렬 컴프 + Imager Stereoize 조합 | 저역 배음 생성, 저중역 병렬 압축, 사이드 전용 더블러, 자동 바디 EQ, 음량 자동 복원 | Neutron Sculptor, 서브하모닉 합성 |
 | `gain` | Utility | 단순 게인 | — |
 | `assist` 명령 | Master Assistant | 옥타브 밸런스 편차 보정, PLR 기반 글루 컴프, 저역 모노화, 목표 음압 | Tonal Balance 장르 타깃, Reference 매칭 |
 
@@ -84,6 +85,30 @@
   `irc1`–`irc4`는 비슷한 성격의 별칭
 - 출력 `max_gr_db` > 6이면 `warning`, 목표에 0.3 LU 넘게 못 미치면 `target_missed`
 
+## thicken
+
+빈약한(얇은) 음원을 두툼하게 채운다. 네 단계를 차례로 거치고, `amount`가 네 단계의 양을 함께 조절한다.
+
+```json
+{"module": "thicken", "amount": 50, "auto_gain": true,
+ "harmonics": {"low": 60, "high": 350, "even": 0.7, "mix": 35},
+ "density":   {"low": 150, "high": 1000, "ratio": 4, "mix": 30},
+ "doubler":   {"low": 300, "high": 6000, "mix": 25},
+ "body_eq": "auto"}
+```
+
+| 단계 | 하는 일 | 파라미터 |
+|---|---|---|
+| harmonics | `low`–`high` 저역에서 2·3차 배음을 만들어 `low×2`–`high×4`에 더한다. 원신호와 상관된 성분은 빼서 기음은 그대로 둔다. 작은 스피커에서도 저역이 들린다 | `even` 0–1(클수록 짝수 배음, 따뜻함), `mix` 0–100 |
+| density | 저중역을 강하게 압축한 신호를 RMS를 맞춰 병렬로 섞는다. 큰 소리는 그대로, 서스테인·잔향이 올라와 속이 찬다 | `ratio`, `mix`(실효 최대 80) |
+| doubler | 미드를 변조 딜레이 두 개(13ms/19ms)로 복제해 사이드에만 더한다. 모노 합에서 정확히 상쇄된다 | `mix`, 모노 입력은 건너뜀 |
+| body_eq | 두께 지표가 목표(10dB)보다 모자란 만큼 300Hz 넓은 벨(Q 0.7)을 올린다(최대 +3dB) | `"auto"` 또는 dB 숫자, 0이면 끔 |
+
+- `amount` 50이 각 `mix`의 기본값 그대로이고, 100이면 두 배, 0이면 모두 끈다.
+- `auto_gain`(기본 true): 처리 전 통합 라우드니스로 되돌린다.
+- 출력: `harmonics_db`(추가된 배음의 원신호 대비 레벨), `density_gr_db`, `doubler_mix`,
+  `body_eq_db`, `body_index_db` [전, 후], `stereo_correlation` [전, 후], 필요하면 `phase_warning`·`warning`.
+
 ## gain
 
 ```json
@@ -104,6 +129,10 @@ maximizer -14 LUFS/-1 dBTP transparent
 ### suno-cleanup
 선형 위상 HP 25Hz/24 · 3.2kHz -1.5 Q5 · 9.5kHz -1.5 Q5 · 13kHz -1 Q4 → deesser 6–11k. 음압 변경 없음
 
+### thicken
+HP 25Hz/24 · 3.5kHz -1 Q4 → thicken amount 60 → 싱글밴드 글루(-20dB, 1.5:1) → 저역 모노화(120Hz) →
+maximizer -14 LUFS/-1 dBTP balanced
+
 ### youtube-loudness
 maximizer -14 LUFS / -1 dBTP transparent만
 
@@ -117,5 +146,6 @@ maximizer -14 LUFS / -1 dBTP transparent만
 | `plr_db` | 트루피크 - 통합 라우드니스. 8 이하면 과압축 의심, 16 이상이면 다이내믹이 넓음 |
 | `band_balance_db` | 전체 에너지 대비 대역 에너지(dB). `metallic_*`는 쇳소리 대역 |
 | `octave_db` | 옥타브 밴드 에너지. assist가 기울기 회귀로 튀는 대역을 찾는 데 쓴다 |
+| `body_index_db` | 두께 지표: 150–600Hz 에너지 - 2.4–9.6kHz 에너지(둘 다 2옥타브, 핑크노이즈 = 0dB). 6 미만이면 빈약, 목표 10 내외. 휴리스틱이라 장르마다 다르다 |
 | `stereo_correlation` | +1 모노, 0 무상관, 음수면 위상 문제 |
 | `low_side_to_mid_db` | 120Hz 이하 사이드/미드 비율. -15dB보다 크면 저역 모노화 권장 |
