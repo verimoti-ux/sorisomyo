@@ -1,0 +1,37 @@
+{
+  "description": "예시 체인 — Ozone 스타일 마스터 (EQ → Dynamics → Exciter → Imager → Maximizer)",
+  "modules": [
+    {
+      "module": "eq",
+      "phase": "minimum",
+      "bands": [
+        {"type": "highpass", "freq": 25, "slope": 24},
+        {"type": "bell", "freq": 280, "gain": -1.0, "q": 1.0},
+        {"type": "bell", "freq": 3500, "gain": -1.0, "q": 4.0},
+        {"type": "high_shelf", "freq": 12000, "gain": -0.5, "channel": "side"}
+      ]
+    },
+    {
+      "module": "dynamics",
+      "crossovers": [120, 2000, 8000],
+      "bands": [
+        {"threshold": -22, "ratio": 2.0, "attack": 30, "release": 160},
+        {"threshold": -24, "ratio": 1.6, "attack": 20, "release": 120},
+        {"threshold": -28, "ratio": 1.8, "attack": 10, "release": 90},
+        {"threshold": -32, "ratio": 2.0, "attack": 5, "release": 60}
+      ],
+      "mix": 100
+    },
+    {
+      "module": "exciter",
+      "crossovers": [200, 2000],
+      "bands": [
+        {"mix": 0},
+        {"mode": "tube", "drive": 25, "mix": 15},
+        {"mode": "tape", "drive": 20, "mix": 10}
+      ]
+    },
+    {"module": "imager", "crossovers": [120, 2000], "widths": [-100, 0, 10]},
+    {"module": "maximizer", "target_lufs": -14, "ceiling": -1.0, "character": "balanced"}
+  ]
+}
