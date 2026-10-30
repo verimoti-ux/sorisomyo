@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """izotope_sim — iZotope Ozone/Neutron 스타일 마스터링 체인 시뮬레이터.
 
-iZotope 실제 알고리즘이 아니라, 같은 모듈 구성(EQ · Dynamics · Exciter · Imager ·
-Maximizer · De-esser)과 파라미터 개념을 numpy만으로 재현한 근사 구현이다.
+iZotope 실제 알고리즘이 아니라, 같은 모듈 구성(EQ · Dynamics · Exciter · Imager · Thicken ·
+Maximizer · De-esser, RX식 Upscale)과 파라미터 개념을 numpy만으로 재현한 근사 구현이다.
 Hermes 에이전트가 터미널에서 호출하고 JSON 결과를 읽도록 설계했다.
 
 사용법:
@@ -10,6 +10,7 @@ Hermes 에이전트가 터미널에서 호출하고 JSON 결과를 읽도록 설
   izotope_sim.py process IN OUT (--chain CHAIN.json | --preset NAME) [--report R.json]
   izotope_sim.py assist IN --out CHAIN.json [--series electric-folklore|blues] [--target -14]
   izotope_sim.py match IN REF OUT
+  izotope_sim.py upscale IN OUT [--sr 48000] [--bits 24|32f|16] [--stereo] [--amount 50]
   izotope_sim.py presets
 """
 
@@ -18,6 +19,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -41,6 +43,10 @@ def read_audio(path):
     try:
         return _read_wav(path)
     except (wave.Error, EOFError, ValueError):
+        pass
+    try:
+        return _read_wav_float(path)
+    except (ValueError, struct.error, OSError):
         pass
     if not shutil.which("ffmpeg"):
         sys.exit("PCM WAV가 아닌 파일은 ffmpeg가 필요합니다.")
@@ -71,21 +77,63 @@ def _read_wav(path):
     return data.reshape(-1, ch), sr
 
 
-def write_audio(path, x, sr):
-    """24비트 PCM으로 저장한다. .wav가 아니면 ffmpeg로 변환한다."""
+def _read_wav_float(path):
+    """wave 모듈이 못 읽는 IEEE float(포맷 3) WAV를 읽는다."""
+    with open(path, "rb") as f:
+        buf = f.read()
+    if buf[:4] != b"RIFF" or buf[8:12] != b"WAVE":
+        raise ValueError("WAV 아님")
+    pos, fmt, data = 12, None, None
+    while pos + 8 <= len(buf):
+        cid, size = buf[pos:pos + 4], struct.unpack("<I", buf[pos + 4:pos + 8])[0]
+        body = buf[pos + 8:pos + 8 + size]
+        if cid == b"fmt ":
+            fmt = struct.unpack("<HHIIHH", body[:16])
+            if fmt[0] == 0xFFFE and len(body) >= 26:
+                fmt = (struct.unpack("<H", body[24:26])[0],) + fmt[1:]
+        elif cid == b"data":
+            data = body
+        pos += 8 + size + (size & 1)
+    if not fmt or data is None or fmt[0] != 3 or fmt[5] not in (32, 64):
+        raise ValueError("float WAV 아님")
+    arr = np.frombuffer(data, "<f4" if fmt[5] == 32 else "<f8").astype(np.float64)
+    return arr.reshape(-1, fmt[1]), fmt[2]
+
+
+def write_audio(path, x, sr, bits="24"):
+    """bits: "24"(기본, PCM) | "16"(TPDF 디더) | "32f"(float). .wav가 아니면 ffmpeg로 변환한다."""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     if path.lower().endswith(".wav"):
-        _write_wav(path, x, sr)
+        _write_wav(path, x, sr, bits)
         return
     if not shutil.which("ffmpeg"):
         sys.exit("WAV 이외 형식으로 저장하려면 ffmpeg가 필요합니다.")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_wav = os.path.join(tmp, "out.wav")
-        _write_wav(tmp_wav, x, sr)
+        _write_wav(tmp_wav, x, sr, bits)
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", tmp_wav, path], check=True)
 
 
-def _write_wav(path, x, sr):
+def _write_wav(path, x, sr, bits="24"):
+    bits = str(bits)
+    if bits == "32f":
+        data = x.astype("<f4").tobytes()
+        ch = x.shape[1]
+        body = (b"WAVE" + b"fmt " + struct.pack("<IHHIIHH", 16, 3, ch, sr, sr * ch * 4, ch * 4, 32)
+                + b"fact" + struct.pack("<II", 4, len(x)) + b"data" + struct.pack("<I", len(data)) + data)
+        with open(path, "wb") as f:
+            f.write(b"RIFF" + struct.pack("<I", len(body)) + body)
+        return
+    if bits == "16":
+        rng = np.random.default_rng(0)
+        tpdf = (rng.random(x.shape) - rng.random(x.shape))
+        v = np.clip(np.round(x * 32768 + tpdf), -32768, 32767).astype("<i2")
+        with wave.open(path, "wb") as w:
+            w.setnchannels(x.shape[1])
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(v.tobytes())
+        return
     v = np.round(np.clip(x, -1.0, 1.0 - 1.0 / (1 << 23)) * (1 << 23)).astype(np.int32)
     b = np.empty((v.size, 3), np.uint8)
     flat = v.reshape(-1)
@@ -709,6 +757,210 @@ def run_chain(x, sr, chain):
     return x, steps
 
 
+# ---------------------------------------------------------------- 업스케일 (정보량 보강)
+# 잃어버린 원본 정보를 되살리는 것이 아니라, 남은 신호로부터 그럴듯한 정보를 다시 만든다
+# (RX De-clip, 대역 확장(SBR), 리샘플, 스테레오화의 개념).
+
+def detect_cutoff(x, sr):
+    """손실 압축이 남긴 고역 차단 주파수(Hz)를 찾는다. 자연스러운 롤오프면 None."""
+    f, p = _avg_spectrum(x, sr, nfft=8192)
+    S = 10 * np.log10(np.maximum(p, EPS))
+    bw = max(1, int(150 / (f[1] - f[0])))
+    S = np.convolve(S, np.ones(bw) / bw, mode="same")
+    ref = float(np.median(S[(f >= 1000) & (f < 5000)]))
+    best, best_drop = None, 0.0
+    # 19kHz 이상 차단은 들리지 않으므로(그리고 upscale의 기본 확장 상한이 20kHz라) 문제로 보지 않는다.
+    for fc in np.arange(4000, min(19000.0, sr / 2 - 1000), 100.0):
+        below = S[(f >= fc - 600) & (f < fc - 100)].mean()
+        above = S[(f >= fc + 100) & (f < fc + 600)].mean()
+        rest = S[(f >= fc + 100) & (f < sr / 2 * 0.98)].mean()
+        drop = below - above
+        if drop > 25 and rest < ref - 40 and drop > best_drop:
+            best, best_drop = float(fc), float(drop)
+    return best
+
+
+def _effective_bits(x):
+    """24비트 격자 위에서 실제로 쓰인 비트 수. 16비트 원본이면 16."""
+    q = np.round(x * (1 << 23)).astype(np.int64).reshape(-1)
+    nz = q[q != 0]
+    if not len(nz):
+        return 0
+    acc = int(np.bitwise_or.reduce(np.abs(nz)))
+    tz = (acc & -acc).bit_length() - 1
+    return 24 - tz
+
+
+def _clip_runs(ch, min_run=3):
+    peak = float(np.abs(ch).max())
+    if peak <= 0:
+        return [], peak
+    m = np.abs(ch) >= peak * 0.998
+    d = np.diff(np.concatenate([[0], m.astype(np.int8), [0]]))
+    starts, ends = np.where(d == 1)[0], np.where(d == -1)[0]
+    keep = (ends - starts) >= min_run
+    return list(zip(starts[keep].tolist(), ends[keep].tolist())), peak
+
+
+def quality(x, sr):
+    """정보량 진단: 샘플레이트, 유효 비트, 대역폭, 모노 여부, 클리핑."""
+    fc = detect_cutoff(x, sr)
+    runs = sum(len(_clip_runs(x[:, c])[0]) for c in range(x.shape[1]))
+    dual_mono = x.shape[1] == 2 and float(np.max(np.abs(x[:, 0] - x[:, 1]))) < 1e-6
+    q = {"sample_rate": sr, "effective_bits": _effective_bits(x),
+         "bandwidth_hz": fc if fc else round(sr / 2), "lossy_cutoff": fc is not None,
+         "channels": x.shape[1], "mono_content": x.shape[1] == 1 or dual_mono, "clip_runs": runs}
+    issues = []
+    if sr < 44100:
+        issues.append(f"샘플레이트 {sr}Hz — 44.1kHz 미만")
+    if q["effective_bits"] and q["effective_bits"] < 16:
+        issues.append(f"유효 비트 {q['effective_bits']}bit")
+    if fc:
+        issues.append(f"{fc / 1000:.1f}kHz 이상이 잘림(손실 압축 흔적)")
+    if q["mono_content"]:
+        issues.append("모노 음원")
+    if runs > 10:
+        issues.append(f"클리핑 구간 {runs}곳")
+    q["issues"] = issues
+    return q
+
+
+def declip(x):
+    """클리핑 구간을 앞뒤 기울기로 이어 붙이는 3차 에르미트 보간으로 복원한다(RX De-clip 개념)."""
+    y = x.copy()
+    total = 0
+    for c in range(x.shape[1]):
+        runs, peak = _clip_runs(x[:, c])
+        ch = y[:, c]
+        for a, b in runs:
+            if a < 2 or b + 2 > len(ch) or b - a > 400:
+                continue
+            p0, p1 = ch[a - 1], ch[b]
+            m0, m1 = ch[a - 1] - ch[a - 2], ch[b + 1] - ch[b]
+            D = b - a + 1
+            t = (np.arange(a, b) - (a - 1)) / D
+            h = ((2 * t ** 3 - 3 * t ** 2 + 1) * p0 + (t ** 3 - 2 * t ** 2 + t) * D * m0
+                 + (-2 * t ** 3 + 3 * t ** 2) * p1 + (t ** 3 - t ** 2) * D * m1)
+            sign = np.sign(ch[a:b])
+            # 기울기 추정이 튀면 과하게 솟으므로 클립 레벨의 1.6배(+4dB)까지만 복원한다.
+            ch[a:b] = sign * np.clip(sign * h, np.abs(ch[a:b]), peak * 1.6)
+            total += 1
+    return y, total
+
+
+def resample(x, sr_in, sr_out):
+    """블록 FFT 리샘플(유리수 비율). 경계는 넉넉한 겹침으로 버린다."""
+    if sr_in == sr_out:
+        return x
+    g = math.gcd(sr_in, sr_out)
+    L, M = sr_out // g, sr_in // g
+    n, ch = x.shape
+    n_out = n * L // M
+    chunk = M * max(1, (1 << 16) // M)
+    pad = M * max(1, -(-4096 // M))
+    xp = np.vstack([np.zeros((pad, ch)), x, np.zeros((pad + chunk, ch))])
+    out = np.zeros((n_out, ch))
+    edge = 0.5 * min(sr_in, sr_out)
+    for s in range(0, n, chunk):
+        seg = xp[s:s + chunk + 2 * pad]
+        mp = len(seg)
+        mo = mp * L // M
+        X = np.fft.rfft(seg, axis=0)
+        fk = np.arange(len(X)) * sr_in / mp
+        taper = np.clip((edge - fk) / (0.07 * edge), 0, 1)
+        taper = 0.5 - 0.5 * np.cos(np.pi * taper)
+        Y = np.zeros((mo // 2 + 1, ch), complex)
+        k = min(len(X), len(Y))
+        Y[:k] = X[:k] * taper[:k, None]
+        y = np.fft.irfft(Y, mo, axis=0) * (mo / mp)
+        o0, o1 = s * L // M, min(n_out, (s + chunk) * L // M)
+        off = pad * L // M
+        out[o0:o1] = y[off:off + o1 - o0]
+    return out
+
+
+def bandwidth_extend(x, sr, fc, max_freq=20000.0, amount=50.0):
+    """SBR 방식 대역 확장: 차단 주파수 아래 한 옥타브를 위로 복제하고 스펙트럼 기울기를 이어 붙인다.
+
+    원신호는 그대로 두고 생성한 고역만 더한다. 복제 간격을 홉의 배수 빈으로 맞춰 프레임 사이
+    위상이 이어지게 했다.
+    """
+    nfft, hop = 2048, 512
+    win = np.sqrt(0.5 - 0.5 * np.cos(2 * np.pi * np.arange(nfft) / nfft))
+    kc = int(fc * nfft / sr)
+    w = (kc // 2) // (nfft // hop) * (nfft // hop)
+    kmax = int(min(max_freq, 0.97 * sr / 2) * nfft / sr)
+    if w < 8 or kc >= kmax - 4:
+        return x, {"skipped": "확장할 대역 없음"}
+    f, p = _avg_spectrum(x, sr)
+    sel = (f >= fc / 4) & (f < fc * 0.95)
+    slope = float(np.polyfit(np.log2(f[sel]), 10 * np.log10(np.maximum(p[sel], EPS)), 1)[0])
+    slope = max(-15.0, min(-3.0, slope)) - 1.5
+    tgt = np.arange(kc, kmax)
+    src = kc - w + ((tgt - kc) % w)
+    gain = 10 ** (slope * np.log2(tgt / src) / 20) * (amount / 50)
+    gain *= np.clip((tgt - kc + 1) / 8, 0, 1)
+    n, ch = x.shape
+    xp = np.vstack([np.zeros((nfft, ch)), x, np.zeros((nfft + hop, ch))])
+    nfr = (len(xp) - nfft) // hop + 1
+    gen = np.zeros_like(xp)
+    q = nfft // hop
+    for c in range(ch):
+        for b0 in range(0, nfr, 1024):
+            st = np.arange(b0, min(nfr, b0 + 1024)) * hop
+            X = np.fft.rfft(xp[st[:, None] + np.arange(nfft), c] * win, axis=1)
+            G = np.zeros_like(X)
+            G[:, tgt] = X[:, src] * gain
+            g = np.fft.irfft(G, nfft, axis=1) * win
+            B = len(st)
+            acc = np.zeros((B + q - 1) * hop)
+            for j in range(q):
+                acc[j * hop:(j + B) * hop] += g[:, j * hop:(j + 1) * hop].reshape(-1)
+            e = min(len(gen), st[0] + len(acc))
+            gen[st[0]:e, c] += acc[:e - st[0]]
+    gen = gen[nfft:nfft + n] / (np.sum(win ** 2) / hop)
+    info = {"cutoff_hz": fc, "extended_to_hz": round(kmax * sr / nfft), "slope_db_oct": round(slope, 1),
+            "added_db": round(_db(_rms(gen)) - _db(_rms(x)), 1)}
+    if fc < 16000:
+        info["note"] = "차단 주파수가 16kHz 미만이라 금속성 대역(8–16kHz) 일부를 새로 만들었습니다. 쇳소리가 들리면 amount를 낮추세요."
+    return x + gen, info
+
+
+def stereoize(x, sr, width=35.0):
+    """모노를 스테레오로: 디코릴레이트한 중역을 사이드에만 넣어 모노 합은 원본과 같다."""
+    m = x.mean(axis=1)
+    src = split_bands(m[:, None], sr, [300, 8000])[1][:, 0]
+    s = (_mod_delay(src, sr, 11.0, 0.8, 0.31, 0.0) - _mod_delay(src, sr, 17.0, 1.1, 0.23, math.pi / 3)) / 2
+    return from_ms(m, s * width / 100 * 2)
+
+
+def upscale(x, sr, target_sr=None, amount=50.0, max_freq=20000.0, bwe=True, do_declip="auto",
+            make_stereo=False, width=35.0):
+    before = quality(x, sr)
+    steps = []
+    if do_declip == "on" or (do_declip == "auto" and before["clip_runs"] > 10):
+        x, n = declip(x)
+        steps.append({"step": "declip", "repaired_runs": n})
+    target_sr = int(target_sr or max(sr, 48000))
+    if target_sr != sr:
+        x = resample(x, sr, target_sr)
+        steps.append({"step": "resample", "from": sr, "to": target_sr})
+    fc = detect_cutoff(x, target_sr) if bwe else None
+    if fc is None and bwe and sr < 44100:
+        fc = sr / 2 * 0.93  # 낮은 샘플레이트 원본은 원래 나이퀴스트가 곧 차단 주파수
+    if fc and amount > 0:
+        x, info = bandwidth_extend(x, target_sr, fc, max_freq, amount)
+        steps.append({"step": "bandwidth_extend", **info})
+    if make_stereo and before["mono_content"]:
+        x = stereoize(x, target_sr, width)
+        steps.append({"step": "stereoize", "width": width})
+    tp = float(true_peak_env(x).max())
+    if tp > 10 ** (-0.3 / 20):
+        x = x * (10 ** (-0.3 / 20) / tp)
+        steps.append({"step": "headroom", "gain_db": round(_db(10 ** (-0.3 / 20) / tp), 2)})
+    return x, target_sr, steps, before
+
+
 # ---------------------------------------------------------------- 프리셋
 
 HP = {"type": "highpass", "freq": 25, "slope": 24}
@@ -873,6 +1125,17 @@ def main(argv=None):
     s.add_argument("input")
     s.add_argument("reference")
     s.add_argument("output")
+    s = sub.add_parser("upscale")
+    s.add_argument("input")
+    s.add_argument("output")
+    s.add_argument("--sr", type=int, help="출력 샘플레이트(기본: max(원본, 48000))")
+    s.add_argument("--bits", choices=["16", "24", "32f"], default="24")
+    s.add_argument("--amount", type=float, default=50.0, help="고역 복원 양 0–100 (0이면 끔)")
+    s.add_argument("--max-freq", type=float, default=20000.0)
+    s.add_argument("--declip", choices=["auto", "on", "off"], default="auto")
+    s.add_argument("--stereo", action="store_true", help="모노 음원을 스테레오로")
+    s.add_argument("--width", type=float, default=35.0)
+    s.add_argument("--report")
     sub.add_parser("presets")
     args = ap.parse_args(argv)
 
@@ -881,6 +1144,7 @@ def main(argv=None):
     elif args.cmd == "analyze":
         x, sr = read_audio(args.input)
         res = analyze(x, sr)
+        res["quality"] = quality(x, sr)
         if args.json:
             _dump(res)
         else:
@@ -916,6 +1180,18 @@ def main(argv=None):
         res = {"output": args.output, "gain_db": round(lr - lx, 2), "lufs": round(lr, 2), "true_peak_dbtp": round(tp, 2)}
         if tp > 0:
             res["warning"] = "트루피크가 0dBTP를 넘어 저장 시 클리핑됩니다. A/B용으로는 기준 파일을 낮춰 맞추세요."
+        _dump(res)
+    elif args.cmd == "upscale":
+        x, sr = read_audio(args.input)
+        y, osr, steps, before = upscale(x, sr, args.sr, args.amount, args.max_freq, args.amount > 0,
+                                        args.declip, args.stereo, args.width)
+        write_audio(args.output, y, osr, args.bits)
+        after = quality(*read_audio(args.output)) if args.output.lower().endswith(".wav") else quality(y, osr)
+        res = {"output": args.output, "bits": args.bits, "steps": steps,
+               "before": before, "after": after}
+        if args.report:
+            with open(args.report, "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
         _dump(res)
 
 

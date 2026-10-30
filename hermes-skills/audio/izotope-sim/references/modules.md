@@ -15,6 +15,7 @@
 | `maximizer` (limiter, ozone_maximizer) | Ozone Maximizer | 룩어헤드 트루피크 리미터, 목표 LUFS 자동 게인, 성격별 릴리즈 | IRC 알고리즘, Soft Clip, Transient Emphasis |
 | `thicken` (enrich, body, warmth, fatten) | Ozone Exciter + Low End Focus + Neutron 병렬 컴프 + Imager Stereoize 조합 | 저역 배음 생성, 저중역 병렬 압축, 사이드 전용 더블러, 자동 바디 EQ, 음량 자동 복원 | Neutron Sculptor, 서브하모닉 합성 |
 | `gain` | Utility | 단순 게인 | — |
+| `upscale` 명령 | RX De-clip + 대역 확장(SBR 개념) + 리샘플 + Imager Stereoize | 손실 압축 차단 검출, 고역 복원, 클리핑 복원, 리샘플(최대 96kHz 이상), 모노→스테레오, 16/24/32f 저장 | RX Spectral Repair, De-crackle, MP3 아티팩트 제거, 머신러닝 복원 |
 | `assist` 명령 | Master Assistant | 옥타브 밸런스 편차 보정, PLR 기반 글루 컴프, 저역 모노화, 목표 음압 | Tonal Balance 장르 타깃, Reference 매칭 |
 
 ## eq
@@ -108,6 +109,38 @@
 - `auto_gain`(기본 true): 처리 전 통합 라우드니스로 되돌린다.
 - 출력: `harmonics_db`(추가된 배음의 원신호 대비 레벨), `density_gr_db`, `doubler_mix`,
   `body_eq_db`, `body_index_db` [전, 후], `stereo_correlation` [전, 후], 필요하면 `phase_warning`·`warning`.
+
+## upscale (명령)
+
+정보량이 적은 파일을 고음질 파일로 보강한다. 체인 모듈이 아니라 별도 명령이다(샘플레이트가 바뀌기 때문).
+결과 WAV를 `process`의 입력으로 쓰면 된다.
+
+```bash
+python3 izotope_sim.py upscale IN OUT [--sr 48000] [--bits 24|32f|16] [--amount 50] [--max-freq 20000]
+                                      [--declip auto|on|off] [--stereo] [--width 35] [--report R.json]
+```
+
+| 단계 | 조건 | 하는 일 |
+|---|---|---|
+| declip | `auto`: 3샘플 이상 이어진 클립 구간이 10곳 초과 | 구간 앞뒤 기울기로 3차 에르미트 보간, 최대 +4dB까지 피크 복원 |
+| resample | `--sr`(기본 max(원본, 48000))이 원본과 다르면 | 블록 FFT 유리수 비율 리샘플 |
+| bandwidth_extend | 손실 압축 차단이 검출되거나 원본이 44.1kHz 미만 | 차단 주파수 아래 한 옥타브를 위로 복제(SBR), 원래 스펙트럼 기울기를 이어서 `--max-freq`까지 채움. 원신호는 건드리지 않고 생성분만 더함 |
+| stereoize | `--stereo`이고 모노(또는 L=R) 음원 | 디코릴레이트한 300Hz–8kHz를 사이드에만 추가. 모노 합은 원본과 같음 |
+| headroom | 트루피크 > -0.3dBTP | 전체 게인을 내려 클리핑 방지 |
+
+- `--amount` 0–100(기본 50): 생성 고역의 양. 0이면 대역 확장을 끈다
+- `--bits`: `24`(기본) | `32f`(float, 보관·재작업용) | `16`(TPDF 디더, CD 규격)
+- 이미 고음질이면(차단 없음, 44.1kHz 이상, 클리핑 없음) 아무 것도 하지 않는다
+
+### quality (analyze 결과에 포함)
+
+| 키 | 의미 |
+|---|---|
+| `effective_bits` | 실제로 쓰인 비트 수(16비트 원본이면 16) |
+| `bandwidth_hz` / `lossy_cutoff` | 손실 압축 차단 주파수(4–19kHz 범위에서 25dB 넘는 급경사). 없으면 나이퀴스트 |
+| `mono_content` | 모노이거나 L=R |
+| `clip_runs` | 3샘플 이상 이어진 클립 구간 수 |
+| `issues` | 사람이 읽는 문제 목록. 비어 있으면 upscale 필요 없음 |
 
 ## gain
 
